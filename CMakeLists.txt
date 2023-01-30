@@ -65,3 +65,4 @@ if(glm_FOUND)
 endif()
 
 add_subdirectory(environment)
+add_subdirectory(triangle)
