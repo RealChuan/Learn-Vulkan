@@ -38,6 +38,27 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
+const static const char *image_path = "C:\\Mine\\PICTURE\\wallpapers";
+
+// 一个函数来获取目录下所有图片文件的名称
+std::vector<std::string> getImageFilenames(const std::string &directory)
+{
+    std::vector<std::string> filenames;
+
+    std::filesystem::path path(directory);
+    for (const auto &entry : std::filesystem::directory_iterator(path)) {
+        if (entry.is_regular_file()) {
+            std::string filename = entry.path().string();
+            if (filename.find(".jpg") != std::string::npos
+                || filename.find(".png") != std::string::npos) {
+                filenames.push_back(filename);
+            }
+        }
+    }
+
+    return filenames;
+}
+
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance,
                                       const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
                                       const VkAllocationCallbacks *pAllocator,
@@ -131,15 +152,6 @@ const std::vector<Vertex> vertices = {{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f
 
 const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
 
-// 假设您已经定义了一个结构体来存储Vulkan图像对象
-struct VulkanImage
-{
-    VkImage image;
-    VkDeviceMemory memory;
-    VkImageView view;
-    VkSampler sampler;
-};
-
 class HelloTriangleApplication
 {
 public:
@@ -178,6 +190,11 @@ private:
 
     VkCommandPool commandPool;
 
+    VkImage textureImage;
+    VkDeviceMemory textureImageMemory;
+    VkImageView textureImageView;
+    VkSampler textureSampler;
+
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
@@ -199,6 +216,8 @@ private:
 
     bool framebufferResized = false;
 
+    std::vector<std::string> filepaths;
+
     void initWindow()
     {
         glfwInit();
@@ -218,6 +237,8 @@ private:
 
     void initVulkan()
     {
+        filepaths = getImageFilenames(image_path);
+
         createInstance();
         setupDebugMessenger();
         createSurface();
@@ -230,6 +251,9 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createTextureImage(filepaths.at(0));
+        createTextureImageView();
+        createTextureSampler();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -239,23 +263,56 @@ private:
         createSyncObjects();
     }
 
+    void resetTextrue(const std::string_view &filename)
+    {
+        vkDeviceWaitIdle(device);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+            vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
+        }
+
+        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+
+        vkDestroySampler(device, textureSampler, nullptr);
+        vkDestroyImageView(device, textureImageView, nullptr);
+
+        vkDestroyImage(device, textureImage, nullptr);
+        vkFreeMemory(device, textureImageMemory, nullptr);
+
+        //vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+        vkDestroyBuffer(device, indexBuffer, nullptr);
+        vkFreeMemory(device, indexBufferMemory, nullptr);
+
+        vkDestroyBuffer(device, vertexBuffer, nullptr);
+        vkFreeMemory(device, vertexBufferMemory, nullptr);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+            vkDestroyFence(device, inFlightFences[i], nullptr);
+        }
+
+        createTextureImage(filename);
+        createTextureImageView();
+        createTextureSampler();
+        createVertexBuffer();
+        createIndexBuffer();
+        createUniformBuffers();
+        createDescriptorPool();
+        createDescriptorSets();
+        //createCommandBuffers();
+        createSyncObjects();
+
+        vkDeviceWaitIdle(device);
+    }
+
     void mainLoop()
     {
-        // 获取目录下所有图片文件的名称
-        std::vector<std::string> imageFilenames = getImageFilenames(
-            "C://Mine//PICTURE//wallpapers//");
-
-        // 创建一个Vulkan图像对象来存储加载的图片数据
-        VulkanImage vulkanImage = createVulkanImage(swapChainExtent.width,
-                                                    swapChainExtent.height,
-                                                    swapChainImageFormat,
-                                                    VK_IMAGE_TILING_OPTIMAL,
-                                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                                                        | VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
         auto lastTime = std::chrono::system_clock::now();
-        uint32_t currentImageIndex = 0;
+
+        size_t currentImage = 1;
 
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
@@ -266,41 +323,23 @@ private:
             float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime
                                                                                     - lastTime)
                              .count();
-
             // 如果超过一定时间间隔（例如1秒），则切换到下一张图片
-            if (time > 1.0f) {
+            if (time > 5.0f) {
                 // 更新上一次更新图片的时间戳
                 lastTime = currentTime;
 
-                // clean up vulkan image
-                vkDestroyImage(device, vulkanImage.image, nullptr);
-                vkFreeMemory(device, vulkanImage.memory, nullptr);
+                resetTextrue(filepaths.at(currentImage));
 
-                // 从文件中加载图片数据，并将其复制到Vulkan图像对象中
-                copyImageDataToVulkanImage(device,
-                                           physicalDevice,
-                                           commandPool,
-                                           graphicsQueue,
-                                           imageFilenames[currentImageIndex],
-                                           vulkanImage);
-
-                // 将当前显示的图片索引加一，如果超过文件数量，则重置为零
-                currentImageIndex++;
-                if (currentImageIndex >= imageFilenames.size()) {
-                    currentImageIndex = 0;
+                currentImage++;
+                if (currentImage >= filepaths.size()) {
+                    currentImage = 0;
                 }
             }
 
-            // 绘制当前帧
-            drawFrame(vulkanImage);
+            drawFrame();
         }
 
         vkDeviceWaitIdle(device);
-
-        vkDestroySampler(device, vulkanImage.sampler, nullptr);
-        vkDestroyImageView(device, vulkanImage.view, nullptr);
-        vkDestroyImage(device, vulkanImage.image, nullptr);
-        vkFreeMemory(device, vulkanImage.memory, nullptr);
     }
 
     void cleanupSwapChain()
@@ -330,6 +369,12 @@ private:
         }
 
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+
+        vkDestroySampler(device, textureSampler, nullptr);
+        vkDestroyImageView(device, textureImageView, nullptr);
+
+        vkDestroyImage(device, textureImage, nullptr);
+        vkFreeMemory(device, textureImageMemory, nullptr);
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
@@ -818,77 +863,21 @@ private:
         }
     }
 
-    VulkanImage createVulkanImage(int width,
-                                  int height,
-                                  VkFormat format,
-                                  VkImageTiling tiling,
-                                  VkImageUsageFlags usage,
-                                  VkMemoryPropertyFlags properties)
+    void createTextureImage(const std::string_view &filename)
     {
-        VulkanImage vulkanImage;
-
-        // 创建VkImage对象
-        createImage(width,
-                    height,
-                    format,
-                    tiling,
-                    usage,
-                    properties,
-                    vulkanImage.image,
-                    vulkanImage.memory);
-
-        // 创建VkImageView对象
-        vulkanImage.view = createImageView(vulkanImage.image, format);
-
-        // 创建VkSampler对象
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;                   // 放大过滤模式
-        samplerInfo.minFilter = VK_FILTER_LINEAR;                   // 缩小过滤模式
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // U方向寻址模式
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // V方向寻址模式
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // W方向寻址模式
-        samplerInfo.anisotropyEnable = VK_TRUE;                     // 启用各向异性过滤
-        samplerInfo.maxAnisotropy = 16;                             // 最大各向异性值
-        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK; // 边界颜色
-        samplerInfo.unnormalizedCoordinates = VK_FALSE;             // 使用标准化坐标
-        samplerInfo.compareEnable = VK_FALSE;                       // 禁用比较操作
-        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;               // 比较操作符
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;     // Mipmap模式
-        samplerInfo.mipLodBias = 0.0f;                              // Mipmap偏移量
-        samplerInfo.minLod = 0.0f;                                  // 最小Mipmap级别
-        samplerInfo.maxLod = 0.0f;                                  // 最大Mipmap级别
-
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &vulkanImage.sampler) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create texture sampler!");
-        }
-
-        return vulkanImage;
-    }
-
-    // 在copyImageDataToVulkanImage方法中，从一个文件名加载图片数据，并复制到一个Vulkan图片对象中
-    void copyImageDataToVulkanImage(VkDevice device,
-                                    VkPhysicalDevice physicalDevice,
-                                    VkCommandPool commandPool,
-                                    VkQueue graphicsQueue,
-                                    const std::string &filename,
-                                    VulkanImage &vulkanImage)
-    {
-        // 加载图片数据
+        static int count = 0;
         int texWidth, texHeight, texChannels;
-        stbi_uc *pixels = stbi_load(filename.c_str(),
+        stbi_uc *pixels = stbi_load(filename.data(),
                                     &texWidth,
                                     &texHeight,
                                     &texChannels,
                                     STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
         if (!pixels) {
             throw std::runtime_error("failed to load texture image!");
         }
 
-        // 计算图片数据的大小
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-        // 创建一个临时的缓冲区对象，用于存储图片数据
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
         createBuffer(imageSize,
@@ -897,63 +886,67 @@ private:
                      stagingBuffer,
                      stagingBufferMemory);
 
-        // 将图片数据映射到缓冲区内存中，并释放原始数据
         void *data;
         vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
         memcpy(data, pixels, static_cast<size_t>(imageSize));
         vkUnmapMemory(device, stagingBufferMemory);
+
         stbi_image_free(pixels);
 
-        // 创建一个Vulkan图片对象，用于存储复制后的图片数据
         createImage(texWidth,
                     texHeight,
                     VK_FORMAT_R8G8B8A8_SRGB,
                     VK_IMAGE_TILING_OPTIMAL,
                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                    vulkanImage.image,
-                    vulkanImage.memory);
+                    textureImage,
+                    textureImageMemory);
 
-        // 转换Vulkan图片对象的布局，从VK_IMAGE_LAYOUT_UNDEFINED到VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-        transitionImageLayout(vulkanImage.image,
+        transitionImageLayout(textureImage,
                               VK_FORMAT_R8G8B8A8_SRGB,
                               VK_IMAGE_LAYOUT_UNDEFINED,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        // 复制缓冲区对象到Vulkan图片对象中
         copyBufferToImage(stagingBuffer,
-                          vulkanImage.image,
+                          textureImage,
                           static_cast<uint32_t>(texWidth),
                           static_cast<uint32_t>(texHeight));
-
-        // 转换Vulkan图片对象的布局，从VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL到VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        transitionImageLayout(vulkanImage.image,
+        transitionImageLayout(textureImage,
                               VK_FORMAT_R8G8B8A8_SRGB,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        // 销毁临时的缓冲区对象和内存
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    // 一个函数来获取目录下所有图片文件的名称
-    std::vector<std::string> getImageFilenames(const std::string &directory)
+    void createTextureImageView()
     {
-        std::vector<std::string> filenames;
+        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+    }
 
-        std::filesystem::path path(directory);
-        for (const auto &entry : std::filesystem::directory_iterator(path)) {
-            if (entry.is_regular_file()) {
-                std::string filename = entry.path().string();
-                if (filename.find(".jpg") != std::string::npos
-                    || filename.find(".png") != std::string::npos) {
-                    filenames.push_back(filename);
-                }
-            }
+    void createTextureSampler()
+    {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.anisotropyEnable = VK_TRUE;
+        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create texture sampler!");
         }
-
-        return filenames;
     }
 
     VkImageView createImageView(VkImage image, VkFormat format)
@@ -1071,20 +1064,17 @@ private:
     {
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
-        // 创建一个VkBufferImageCopy结构体，用于指定复制操作的源和目标区域
         VkBufferImageCopy region{};
-        region.bufferOffset = 0;              // 缓冲区偏移量
-        region.bufferRowLength = 0;           // 缓冲区行长度（0表示紧密排列）
-        region.bufferImageHeight = 0;         // 缓冲区图像高度（0表示紧密排列）
-        region.imageSubresource.aspectMask
-            = VK_IMAGE_ASPECT_COLOR_BIT;      // 图像子资源的纵横比掩码（颜色分量）
-        region.imageSubresource.mipLevel = 0; // 图像子资源的mip等级（基本等级）
-        region.imageSubresource.baseArrayLayer = 0; // 图像子资源的基本数组层（单层）
-        region.imageSubresource.layerCount = 1;     // 图像子资源的层数（单层）
-        region.imageOffset = {0, 0, 0};             // 图像偏移量（左上角）
-        region.imageExtent = {width, height, 1};    // 图像范围（宽度、高度和深度）
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = {width, height, 1};
 
-        // 调用vkCmdCopyBufferToImage命令，将缓冲区对象复制到图片对象中
         vkCmdCopyBufferToImage(commandBuffer,
                                buffer,
                                image,
@@ -1213,8 +1203,8 @@ private:
 
             VkDescriptorImageInfo imageInfo{};
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            //imageInfo.imageView = textureImageView;
-            //imageInfo.sampler = textureSampler;
+            imageInfo.imageView = textureImageView;
+            imageInfo.sampler = textureSampler;
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
@@ -1349,123 +1339,51 @@ private:
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer,
-                             uint32_t imageIndex,
-                             VulkanImage &vulkanImage)
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex)
     {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-        // 开始记录命令缓冲区
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
             throw std::runtime_error("failed to begin recording command buffer!");
         }
 
-        // 将自己的图像从VK_IMAGE_LAYOUT_UNDEFINED转换为VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL布局，以便接收复制操作
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = vulkanImage.image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
+        VkRenderPassBeginInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = renderPass;
+        renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
+        renderPassInfo.renderArea.offset = {0, 0};
+        renderPassInfo.renderArea.extent = swapChainExtent;
 
-        barrier.srcAccessMask = 0;                            // 没有需要等待的操作
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // 需要等待复制操作完成
+        VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues = &clearColor;
 
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             1,
-                             &barrier);
+        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        // 将交换链图像从VK_IMAGE_LAYOUT_UNDEFINED转换为VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL布局，以便接收复制操作
-        barrier.image = swapChainImages[currentFrame];
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             1,
-                             &barrier);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-        // 创建一个VkImageCopy结构体，用于指定复制操作的源和目标区域
-        VkImageCopy copyRegion{};
-        copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copyRegion.srcSubresource.mipLevel = 0;
-        copyRegion.srcSubresource.baseArrayLayer = 0;
-        copyRegion.srcSubresource.layerCount = 1;
-        copyRegion.srcOffset = {0, 0, 0};
-        copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copyRegion.dstSubresource.mipLevel = 0;
-        copyRegion.dstSubresource.baseArrayLayer = 0;
-        copyRegion.dstSubresource.layerCount = 1;
-        copyRegion.dstOffset = {0, 0, 0};
-        copyRegion.extent.width = swapChainExtent.width;
-        copyRegion.extent.height = swapChainExtent.height;
-        copyRegion.extent.depth = 1;
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = (float) swapChainExtent.width;
+        viewport.height = (float) swapChainExtent.height;
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
-        // 调用vkCmdCopyImage命令，将自己的图像复制到交换链图像中
-        vkCmdCopyImage(commandBuffers[currentFrame],
-                       vulkanImage.image,
-                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       swapChainImages[currentFrame],
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1,
-                       &copyRegion);
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = swapChainExtent;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // 将自己的图像从VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL转换为VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL布局，以便被采样器读取
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkBuffer vertexBuffers[] = {vertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // 需要等待复制操作完成
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;    // 需要等待采样器读取完成
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-        vkCmdPipelineBarrier(commandBuffers[currentFrame],
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             0,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             1,
-                             &barrier);
-
-        // 将交换链图像从VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL转换为VK_IMAGE_LAYOUT_PRESENT_SRC_KHR布局，以便被显示输出
-        barrier.image = swapChainImages[currentFrame];
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // 需要等待复制操作完成
-        barrier.dstAccessMask = 0;                            // 没有需要等待的操作
-
-        vkCmdPipelineBarrier(commandBuffers[currentFrame],
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                             0,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             1,
-                             &barrier);
-
-        // 绑定描述符集，用于将自己的图像和采样器传递给着色器
-        vkCmdBindDescriptorSets(commandBuffers[currentFrame],
+        vkCmdBindDescriptorSets(commandBuffer,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout,
                                 0,
@@ -1474,34 +1392,11 @@ private:
                                 0,
                                 nullptr);
 
-        // 设置视口和裁剪矩形
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = (float) swapChainExtent.height;       // y坐标是从下往上增长的
-        viewport.width = (float) swapChainExtent.width;
-        viewport.height = -(float) swapChainExtent.height; // 高度是负数，表示反转y轴
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
-        VkRect2D scissor{};
-        scissor.offset.x = scissor.offset.y = 0; // 裁剪矩形的左上角坐标
-        scissor.extent = swapChainExtent;        // 裁剪矩形的宽度和高度
+        vkCmdEndRenderPass(commandBuffer);
 
-        vkCmdSetViewport(commandBuffers[currentFrame], 0, 1, &viewport); // 设置视口
-        vkCmdSetScissor(commandBuffers[currentFrame], 0, 1, &scissor);   // 设置裁剪矩形
-
-        // 绘制三角形
-        vkCmdBindPipeline(commandBuffers[currentFrame],
-                          VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          graphicsPipeline); // 绑定图形管线
-        vkCmdDraw(commandBuffers[currentFrame],
-                  3,
-                  1,
-                  0,
-                  0); // 绘制三个顶点，一个实例，从第一个顶点和实例开始
-
-        // 提交命令缓冲区
-        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) { // 结束记录命令缓冲区
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
         }
     }
@@ -1550,15 +1445,15 @@ private:
                                     swapChainExtent.width / (float) swapChainExtent.height,
                                     0.1f,
                                     10.0f);
-        ubo.model = glm::mat4(1.0f);
-        ubo.view = glm::mat4(1.0f);
-        ubo.proj = glm::mat4(1.0f);
+        // ubo.model = glm::mat4(1.0f);
+        // ubo.view = glm::mat4(1.0f);
+        // ubo.proj = glm::mat4(1.0f);
         ubo.proj[1][1] *= -1;
 
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
-    void drawFrame(VulkanImage &vulkanImage)
+    void drawFrame()
     {
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
@@ -1582,7 +1477,7 @@ private:
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
         vkResetCommandBuffer(commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
-        recordCommandBuffer(commandBuffers[currentFrame], imageIndex, vulkanImage);
+        recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

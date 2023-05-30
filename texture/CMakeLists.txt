@@ -34,8 +34,3 @@ add_custom_command(
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/texture/texture.jpg"
           "$<TARGET_FILE_DIR:texture>/texture_dir/texture.jpg")
-
-add_executable(texture_loop texture_loop.cc)
-target_include_directories(texture_loop PRIVATE ${VULKAN_HPP_INCLUDE_DIRS}
-                                                ${Stb_INCLUDE_DIR})
-target_link_libraries(texture_loop PRIVATE glfw glm::glm Vulkan::Vulkan)
