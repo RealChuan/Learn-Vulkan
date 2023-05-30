@@ -38,7 +38,7 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
-const static const char *image_path = "C:\\Mine\\PICTURE\\wallpapers";
+static const char *image_path = "C:\\Mine\\PICTURE\\wallpapers";
 
 // 一个函数来获取目录下所有图片文件的名称
 std::vector<std::string> getImageFilenames(const std::string &directory)
