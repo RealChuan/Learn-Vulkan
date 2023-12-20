@@ -1,0 +1,7 @@
+---
+Checks:          'clang-analyzer-*,readability-*,performance-*,modernize-*,bugprone-*,cert-*,portability-*,llvm-*,google-*'
+WarningsAsErrors: ''
+HeaderFilterRegex: '.'
+AnalyzeTemporaryDtors: false
+FormatStyle:     none
+User:            user

@@ -10,7 +10,7 @@ foreach(GLSL ${GLSL_SOURCE_FILES})
   add_custom_command(
     OUTPUT ${SPIRV}
     COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${PROJECT_BINARY_DIR}/vertexbuffers/"
+            "${PROJECT_BINARY_DIR}/shaders/vertexbuffers/"
     COMMAND glslc ${GLSL} -o ${SPIRV}
     DEPENDS ${GLSL})
   list(APPEND SPIRV_BINARY_FILES ${SPIRV})
